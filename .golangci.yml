@@ -1,0 +1,70 @@
+version: "2"
+
+run:
+  build-tags:
+    - integration
+
+linters:
+  default: standard
+  enable:
+    - bodyclose
+    - depguard
+    - errorlint
+    - exhaustive
+    - gosec
+    - misspell
+    - nilerr
+    - noctx
+    - sloglint
+    - unconvert
+    - usestdlibvars
+  settings:
+    depguard:
+      rules:
+        core-uses-interfaces:
+          files:
+            - "**/internal/job/**"
+            - "**/internal/httpapi/**"
+            - "**/internal/worker/**"
+          deny:
+            - pkg: github.com/Ishoshot/debrief/internal/ai/openai
+              desc: depend on ai.Provider; only cmd/server picks a provider
+            - pkg: github.com/Ishoshot/debrief/internal/ai/gemini
+              desc: depend on ai.Provider; only cmd/server picks a provider
+            - pkg: github.com/Ishoshot/debrief/internal/deliver
+              desc: depend on worker.Sender; only cmd/server picks a destination
+        adapters-stay-independent:
+          files:
+            - "**/internal/ai/openai/**"
+            - "**/internal/ai/gemini/**"
+            - "**/internal/deliver/**"
+            - "!$test"
+          deny:
+            - pkg: github.com/Ishoshot/debrief/internal/ai/openai
+              desc: providers and destinations must not depend on each other
+            - pkg: github.com/Ishoshot/debrief/internal/ai/gemini
+              desc: providers and destinations must not depend on each other
+            - pkg: github.com/Ishoshot/debrief/internal/deliver
+              desc: providers and destinations must not depend on each other
+            - pkg: github.com/Ishoshot/debrief/internal/worker
+              desc: adapters are called by the worker, never the other way round
+            - pkg: github.com/Ishoshot/debrief/internal/httpapi
+              desc: adapters must not depend on the HTTP layer
+            - pkg: github.com/Ishoshot/debrief/internal/job
+              desc: adapters must not depend on storage
+  exclusions:
+    presets:
+      - std-error-handling
+    rules:
+      - path: _test\.go
+        linters:
+          - gosec
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/Ishoshot/debrief
