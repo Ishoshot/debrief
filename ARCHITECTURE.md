@@ -9,7 +9,7 @@ I design the core loop first. After a customer visit, a field-sales rep records 
 Three constraints decide every choice below.
 
 1. **The team is about five engineers.** One deployable backend and managed services remove the need for a platform team.
-2. **The customers are European industrial companies.** Customer data stays in the EU, and the design must pass an enterprise security review.
+2. **The customers are European industrial companies.** Audio, transcripts, reports and model calls stay in the EU, and the design must pass an enterprise security review.
 3. **A wrong CRM record costs more than a late one.** Reps trust the product only while the CRM stays correct. So the AI output is a draft until a person or a tenant rule approves it.
 
 ## Building blocks
@@ -73,7 +73,7 @@ flowchart LR
 | 6 | A worker sends the transcript, the tenant's report schema and candidate CRM accounts to the LLM. The worker validates the output and saves a draft report. | Async | Postgres queue, HTTPS |
 | 7 | A worker sends a push notification. The app fetches the draft report. | Async, then sync | APNs or FCM, HTTPS REST |
 | 8 | The rep fixes any wrong field and approves. In one transaction, the API saves the approval, writes an audit row and inserts a `crm_write` job. | Sync | HTTPS REST |
-| 9 | A worker writes the report to the CRM, keyed by the note ID. A retry does not create a second record. | Async | Postgres queue, HTTPS REST with OAuth |
+| 9 | A worker writes the report to the CRM, keyed by the note ID. Retries follow the CRM write rules in the CRM integration layer. | Async | Postgres queue, HTTPS REST with OAuth |
 | 10 | The note shows "Synced" with a link to the CRM record. If the last retry fails, the note shows "Failed" with the reason and a retry button. | Sync | HTTPS REST |
 
 Each stage saves its output before the next one starts. So a retry of step 9 never repeats the paid calls in steps 5 and 6. If the confirm call in step 4 is lost, a periodic job finds the uploaded audio and repairs the note.
