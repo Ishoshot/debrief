@@ -24,7 +24,7 @@ Three constraints decide every choice below.
 | Async work | Postgres job queue (`FOR UPDATE SKIP LOCKED`), Go worker pool | The queue needs no extra system to run. |
 | AI | Speech-to-text and LLM behind Go interfaces, both in the EU. | Models change every few months. A provider swap is a small change that evals check. |
 | CRM layer | One adapter per CRM behind one Go interface | CRMs differ in auth, API limits and data model. Only the adapter sees these differences. |
-| Infra | AWS Frankfurt (`eu-central-1`), ECS Fargate, Terraform, GitHub Actions | Customer audio and CRM data stay in the EU under GDPR. Frankfurt is close to sales teams in Germany, and Amazon Bedrock runs there. |
+| Infra | AWS Frankfurt (`eu-central-1`), ECS Fargate, Terraform, GitHub Actions | Audio, transcripts and reports stay in the EU under GDPR. Frankfurt is close to sales teams in Germany, and Amazon Bedrock runs there. |
 
 ## How the blocks talk
 
@@ -73,7 +73,7 @@ flowchart LR
 | 6 | A worker sends the transcript, the tenant's report schema and candidate CRM accounts to the LLM. The worker validates the output and saves a draft report. | Async | Postgres queue, HTTPS |
 | 7 | A worker sends a push notification. The app fetches the draft report. | Async, then sync | APNs or FCM, HTTPS REST |
 | 8 | The rep fixes any wrong field and approves. In one transaction, the API saves the approval, writes an audit row and inserts a `crm_write` job. | Sync | HTTPS REST |
-| 9 | A worker upserts the report into the CRM, keyed by the note ID. A retry updates the same CRM record. | Async | Postgres queue, HTTPS REST with OAuth |
+| 9 | A worker writes the report to the CRM, keyed by the note ID. A retry does not create a second record. | Async | Postgres queue, HTTPS REST with OAuth |
 | 10 | The note shows "Synced" with a link to the CRM record. If the last retry fails, the note shows "Failed" with the reason and a retry button. | Sync | HTTPS REST |
 
 Each stage saves its output before the next one starts. So a retry of step 9 never repeats the paid calls in steps 5 and 6. If the confirm call in step 4 is lost, a periodic job finds the uploaded audio and repairs the note.
@@ -98,7 +98,7 @@ One Go binary runs as `api` or `worker`. Its modules are packages under `interna
 - **Two interfaces.** `Transcriber` turns audio into text. `Extractor` turns text and a schema into a report. A saved transcript lets extraction run again without a second transcription cost.
 - **Default LLM.** The default is a Claude model on Amazon Bedrock, called from Frankfurt through the EU inference profile. Bedrock can process an LLM call in any EU region of that profile, so the data stays in the EU but not always in Frankfurt. Bedrock keeps LLM calls in the same AWS account and contract as the rest of the system. Bedrock does not use the data for model training.
 - **Speech-to-text by evals.** I would first compare Amazon Transcribe (same contract, custom vocabulary) with an EU-hosted specialist such as Speechmatics. Word error rate on real field audio decides. Public benchmarks do not contain German dialects, road noise or product names such as "DN 80 flange". Each tenant's vocabulary list (products, customers, competitors) goes to the `Transcriber` and the `Extractor` as hints. Self-hosted Whisper on GPU instances is the fallback if a customer forbids third-party model APIs, or when volume makes self-hosting cheaper.
-- **No invented data.** The schema comes from the tenant's CRM field mapping and allows null for "not mentioned". Each field carries its source quote, which the review screen shows. Code drops a field whose quote is not in the transcript. The LLM picks CRM accounts only from the candidate list. Code resolves relative dates from the recording time.
+- **Grounded extraction.** The schema comes from the tenant's CRM field mapping and allows null for "not mentioned". Each field carries its source quote, which the review screen shows. Code drops a field whose quote is not in the transcript. The LLM picks CRM accounts only from the candidate list. Code resolves relative dates from the recording time.
 - **Evals and budgets.** Every saved AI result records the prompt version, schema version and model. CI runs a golden set of field audio on every prompt, schema or model change. A model swap is then a pull request with an eval report. Each stage logs duration and cost per tenant. The starting target is a draft report within 60 seconds of upload for 95% of notes.
 - **Auto-approve later.** A tenant can auto-approve report types that reps rarely edit before approval.
 
@@ -107,7 +107,7 @@ One Go binary runs as `api` or `worker`. Its modules are packages under `interna
 Each adapter has four operations. It reads the field definitions, searches accounts and contacts, upserts a report and upserts a task.
 
 - Field mapping is versioned tenant data that admins edit in the web app. A tenant with a custom Salesforce setup needs no deploy to onboard.
-- The note ID is the external key for every upsert, so a retry updates the same CRM record. Salesforce keeps this key in an external ID field, Dynamics keeps it in an alternate key, and HubSpot keeps it in a unique property. Where an object cannot hold such a key, the worker searches for the note ID before it writes again. After a write, the worker stores the CRM record ID.
+- The note ID is the key for every CRM write. Where the CRM object supports an external key (an external ID field in Salesforce, an alternate key in Dynamics, a unique property in HubSpot), the write is a native upsert, so a retry updates the same record. CRM search can lag behind a write, so a search that finds nothing does not prove that the first write failed. Where the object has no external key, a write with an unknown result goes to a reconcile job, which checks the CRM again after a delay, instead of a second create. After a write, the worker stores the CRM record ID.
 - Each adapter classifies errors as retryable (timeout, HTTP 429, HTTP 5xx) or permanent. Workers obey `Retry-After`. A per-tenant rate limiter protects the CRM's daily API quota.
 - KMS encrypts the OAuth tokens. After a failed token refresh, the web app shows "Needs reconnect" to the admin. CRM webhooks and a periodic job keep a local account cache for matching and briefings.
 
@@ -119,7 +119,7 @@ Each adapter has four operations. It reads the field definitions, searches accou
 
 ## Security and practices
 
-- Audio, transcripts, reports and all model calls stay in the EU. Push notifications carry only a note ID, because APNs and FCM run outside the EU. KMS keys encrypt stored data. The subprocessor list names every vendor that handles customer data, AI providers included. A GDPR erasure request runs as a job in the same queue.
+- Audio, transcripts, reports and all model calls stay in the EU. The CRM is the customer's own system, so its region is the customer's choice. Push notifications carry only a note ID, because APNs and FCM run outside the EU. KMS keys encrypt stored data. The subprocessor list names every vendor that handles customer data, AI providers included. A GDPR erasure request runs as a job in the same queue.
 - In Germany, recording a person without consent is a criminal offence. So meeting recording needs an explicit consent step.
 - The system deletes audio 30 days after sync by default. Each tenant can change this period.
 - An `AGENTS.md` file gives coding agents the project rules. An AI code review checks each pull request before a human approves it.
