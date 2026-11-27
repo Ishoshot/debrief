@@ -4,7 +4,7 @@ Debrief is my solution to the VoiceLine take-home. It is a Go service that turns
 
 ## Quick start
 
-You need Docker Compose, `curl`, `jq`, an OpenAI or Gemini API key, and Go 1.26 for the tests.
+You need Docker Compose, `make`, `curl`, `jq`, an OpenAI or Gemini API key, and Go 1.26 for the tests.
 
 1. Copy the example config.
 
@@ -93,6 +93,7 @@ If a model is overloaded or retired, set its setting to another allowed model.
 ## Trade-offs
 
 - Debrief stores the audio in the database, not in [object storage](ARCHITECTURE.md#how-part-2-maps-to-this-design).
+- **Two AI providers.** I planned to use only Gemini, because one call gives both the transcript and the visit report. In my tests, Gemini often returned `503` errors (model overload), so I added OpenAI to finish the full flow and made it the default. Both use the same `ai.Provider` interface, so the worker and the delivery code did not change. I kept Gemini as a config option. The service uses one provider at a time and has no automatic failover.
 
 ## AI-assisted development
 
